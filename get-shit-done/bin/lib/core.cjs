@@ -27,6 +27,7 @@ const MODEL_PROFILES = {
   'gsd-verifier':             { quality: 'sonnet', balanced: 'sonnet', budget: 'haiku' },
   'gsd-plan-checker':         { quality: 'sonnet', balanced: 'sonnet', budget: 'haiku' },
   'gsd-integration-checker':  { quality: 'sonnet', balanced: 'sonnet', budget: 'haiku' },
+  'gsd-nyquist-auditor':      { quality: 'sonnet', balanced: 'sonnet', budget: 'haiku' },
 };
 
 // ─── Output helpers ───────────────────────────────────────────────────────────
@@ -76,7 +77,7 @@ function loadConfig(cwd) {
     research: true,
     plan_checker: true,
     verifier: true,
-    nyquist_validation: false,
+    nyquist_validation: true,
     parallelization: true,
     brave_search: false,
   };
