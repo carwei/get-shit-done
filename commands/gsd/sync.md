@@ -89,20 +89,19 @@ If there are no conflicting phases, no conflicting quicks, and no target-only ph
 ## Step 5: Compute new indexes
 
 For conflicting branch-local phases:
-- Compute `local_max_non_conflicting` = highest integer phase number among non-conflicting branch-local phases (0 if none)
-- Compute `next_available = max(target_max_phase, local_max_non_conflicting) + 1`
+- Compute `all_retained_phase_numbers` = integer parts of all phase numbers from target_phases
+  UNION integer parts of all non-conflicting branch-local phase numbers
+- Compute `next_available = max(all_retained_phase_numbers) + 1` (or 1 if the set is empty)
 - Sort conflicting phases by current phase number ascending (numerically, not lexicographically)
-- Assign new integers starting at `next_available`, incrementing by 1
+- Assign each conflicting phase the current `next_available`, then increment by 1
 - Non-conflicting branch-local phases are left at their current number
-- Example: target_max = 18, local non-conflicting max = 19, conflicting local phases are 18 and 20
-  → next_available = max(18, 19) + 1 = 20  ← would collide with existing 20, so bump again
-  → actually: next_available = max(18, 19) + 1 = 20, but 20 is also a conflicting phase being renamed,
-     so assign in order: 18 → 20, 20 → 21
-- In short: compute the full rename map first, then verify no assigned number collides with any
-  remaining local phase not in the rename map. If it does, increment further.
+- Example: target has 18, 20 — local has 18 (conflicting), 19 (non-conflicting), 20 (conflicting)
+  → all_retained = {18, 20} ∪ {19} = {18, 19, 20} → next_available = 21
+  → 18 → 21, 20 → 22. No collisions by construction.
 
 For conflicting branch-local quicks:
-- Same logic: `next_available = max(target_max_quick, local_max_non_conflicting_quick) + 1`
+- Same logic: `all_retained_quick_numbers` = target quick numbers ∪ non-conflicting local quick numbers
+- `next_available = max(all_retained_quick_numbers) + 1`
 
 Build a rename map: `{ old_name: new_name }` for both phases and quicks.
 
@@ -180,11 +179,11 @@ Use `git mv` for all renames so git tracks them as renames rather than delete+ad
 
 For each quick in the rename map (old → new):
 
-1. Rename files inside first. List files in `.planning/quick/<old_name>/`.
-   For each file whose name starts with the old quick number (e.g. `4-`):
-   - Replace old prefix with new (e.g. `4-` → `5-`)
+1. Rename files inside first. List all files in `.planning/quick/<old_name>/`.
+   The old file prefix is the old quick number followed by a hyphen (e.g. `4-`). The new file prefix is the new quick number followed by a hyphen (e.g. `5-`).
+   For each file whose name starts with the old file prefix:
+   - Compute the new filename by replacing the old prefix with the new prefix
    - Run: `git mv ".planning/quick/<old_name>/<old_file>" ".planning/quick/<old_name>/<new_file>"`
-   Note: quick files may also be named `PLAN.md` / `SUMMARY.md` without a numeric prefix — leave those unchanged.
 
 2. Rename the directory:
    - Run: `git mv ".planning/quick/<old_name>" ".planning/quick/<new_name>"`
