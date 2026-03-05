@@ -1,6 +1,6 @@
 ---
 name: gsd:sync
-description: Sync .planning indexes with target branch so the merge is clean — no rebase needed
+description: Sync .planning indexes with target branch so the merge is clean - no rebase needed
 argument-hint: [--dry-run] [--target=<branch>]
 allowed-tools:
   - Read
