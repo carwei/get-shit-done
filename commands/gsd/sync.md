@@ -20,6 +20,13 @@ Specifically:
 4. Rename all affected directories and files to match
 
 After running this, merging produces zero .planning conflicts.
+
+> **This command is invoked precisely because the user suspects collisions may exist — including in
+> archived phases. Do not assume the branches are clean. A collision can be:**
+> - **An index conflict**: same number, different slug (e.g. `22-data-fields` vs `22-progressindicator-component`)
+> - **A location conflict**: same full directory name appearing in different locations (e.g. active on one branch, archived on another)
+>
+> Treat every phase as potentially conflicting until the raw git data proves otherwise.
 </objective>
 
 <execution_context>
@@ -40,74 +47,80 @@ If current branch equals target branch: output error and stop.
 
 Run `git status --short` and note any uncommitted changes. If dirty, warn the user but continue.
 
-## Step 2: Read target branch state
+## Step 2: Run the analysis script
 
-Run these commands to read the target branch without switching to it:
+Run this single command — it does all git reading and conflict detection for you:
 
 ```bash
-git ls-tree --name-only <target> -- .planning/phases/
-git ls-tree --name-only <target> -- .planning/quick/
-git ls-tree -r --name-only <target> -- .planning/milestones/
+node "$(git rev-parse --show-toplevel)/../get-shit-done/scripts/gsd-sync-analyze.cjs" --target=<target>
+```
+
+If the get-shit-done repo is installed elsewhere, adjust the path. If the script is not found,
+fall back to Step 2b below.
+
+Read the script output verbatim. It provides:
+- **TARGET** section: active phases, archived phases, all phase nums, quicks
+- **LOCAL** section: active phases, archived phases, quicks
+- **BRANCH-LOCAL PHASES**: each with location (active/archived + version) and conflict status
+- **BRANCH-LOCAL QUICKS**: each with conflict status
+- **TARGET-ONLY PHASES**: phases on target not present locally (need ROADMAP absorption)
+- **SUMMARY**: whether action is required
+
+Also run:
+```bash
 git show <target>:.planning/ROADMAP.md
 git show <target>:.planning/STATE.md
 ```
 
-If .planning/ doesn't exist on target yet, treat all as empty.
+Extract from the script output (copy directly — do not reinterpret):
+- **target_phases**, **target_archived_phase_dirs**, **target_all_phase_nums**, **target_max_phase**
+- **target_quicks**, **target_max_quick**
+- **local_phases**, **local_archived_phases** (with version)
+- **branch_local_phases** (with location and conflict flag)
+- **branch_local_quicks** (with conflict flag)
+- **target_only_phases**
 
-Extract:
-- **target_phases**: list of phase directory names from `.planning/phases/` (e.g. `["01-foundation", "18-feature-a"]`)
-- **target_quicks**: list of quick directory names (e.g. `["1-fix-sidebar", "3-update-config"]`)
-- **target_archived_phase_dirs**: full phase directory names found in milestone archives — from each file path
-  like `.planning/milestones/v1.8-phases/22-data-fields/22-01-PLAN.md`, extract the third segment after
-  `milestones/`: the part matching `[^/]+-phases/` is the version folder, the next path segment before the
-  next `/` is the phase directory name (e.g. `22-data-fields`). Deduplicate. Keep full names, not just numbers.
-- **target_archived_phase_nums**: integer parts only from target_archived_phase_dirs (e.g. 22 from `22-data-fields`)
-- **target_roadmap**: full ROADMAP.md text from target
-- **target_all_phase_nums**: integer parts of numbers from target_phases UNION target_archived_phase_nums
-- **target_max_phase**: highest number in target_all_phase_nums
-- **target_max_quick**: highest integer quick number in target_quicks
+## Step 2b: Fallback (script not available)
 
-## Step 3: Read local branch state
+If the script cannot be found, run these commands manually. Paste the **complete raw output** of
+each into your working notes before doing any extraction — do not summarize or reconstruct from memory.
 
-List `.planning/phases/` and `.planning/quick/` directories.
-List `.planning/milestones/` recursively to find archived phase directories (pattern `<version>-phases/<NN-slug>/`).
-Read `.planning/ROADMAP.md` and `.planning/STATE.md`.
+```bash
+git ls-tree --name-only <target> -- .planning/phases/ | awk -F'/' '{print $NF}'
+git ls-tree --name-only <target> -- .planning/quick/ | awk -F'/' '{print $NF}'
+git ls-tree -r --name-only <target> -- .planning/milestones/ | awk -F'/' 'NF==5{print $4}' | sort -u
+git ls-tree --name-only HEAD -- .planning/phases/ | awk -F'/' '{print $NF}'
+git ls-tree --name-only HEAD -- .planning/quick/ | awk -F'/' '{print $NF}'
+git ls-tree -r --name-only HEAD -- .planning/milestones/ | awk -F'/' 'NF==5{print $3, $4}' | sort -u
+git show <target>:.planning/ROADMAP.md
+git show <target>:.planning/STATE.md
+```
 
-Extract:
-- **local_phases**: list of active phase directory names from `.planning/phases/`
-- **local_quicks**: list of quick directory names
-- **local_archived_phases**: list of `{ version, dir_name }` for each phase found under `.planning/milestones/`.
-  Use `git ls-tree -r --name-only HEAD -- .planning/milestones/` to get file paths, then parse each path:
-  `.planning/milestones/<version>-phases/<dir_name>/<file>` — extract `<version>` and `<dir_name>` (the
-  path segment immediately after `<version>-phases/` and before the next `/`). Deduplicate by dir_name.
-  e.g. `[{ version: "v1.8", dir_name: "22-data-fields" }, { version: "v1.8", dir_name: "23-compile-pipeline" }]`
-- **local_all_phase_dirs**: local_phases UNION local_archived_phases dir_names
+Then extract manually — keeping full directory names (e.g. `22-data-fields`, never just `22`) at all times.
+
+## Step 3: Read local ROADMAP and STATE
+
+```bash
+cat .planning/ROADMAP.md
+cat .planning/STATE.md
+```
 
 ## Step 4: Identify what needs to change
 
-Two separate checks — keep them distinct:
+Read the script output (or your manual extraction) and identify:
 
-**Check 1: Is it branch-local? (compare by EXACT DIRECTORY NAME)**
-- Collect every full directory name from local_phases and local_archived_phases (e.g. `22-data-fields`)
-- Collect every full directory name from target_phases and target_archived_phases (e.g. `22-progressindicator-component`)
-- **Branch-local phases** = local directory names that do NOT appear verbatim in target's directory names
-  Example: local has `22-data-fields`, target has `22-progressindicator-component` — different names,
-  so `22-data-fields` IS branch-local even though both have "22"
-- **Branch-local quicks** = same logic for quick directories
+**Branch-local phases** = listed in BRANCH-LOCAL PHASES section of script output (or: local dirs not
+  present verbatim in target dirs). Note location: active or archived (+ version).
 
-**Check 2: Does it conflict? (compare by NUMERIC PREFIX only)**
-- For each branch-local phase, extract its numeric prefix: `/^(\d+(?:\.\d+)*)-/`
-- **Conflicting phases** = branch-local phases whose numeric prefix matches ANY number in target_all_phase_nums
-  Example: `22-data-fields` is branch-local, its prefix is 22, target_all_phase_nums contains 22 → CONFLICT
-- **Conflicting quicks** = same logic against target quick numbers
+**Conflicting phases** = branch-local phases flagged CONFLICTS in script output (or: whose numeric
+  prefix matches a number already used on target).
 
-**Target-only phases** = target_phases directory names that do NOT appear verbatim in local_all_phase_dirs.
-  These need their ROADMAP entries absorbed locally.
+**Conflicting quicks** = branch-local quicks flagged CONFLICTS in script output.
 
-Note whether each branch-local phase is **active** (in `.planning/phases/`) or **archived**
-(in `.planning/milestones/<version>-phases/`) — this determines which directory gets renamed in Step 8.
+**Target-only phases** = listed in TARGET-ONLY PHASES section of script output (or: target active
+  phases not present verbatim locally). These need ROADMAP entries absorbed.
 
-If there are no conflicting phases, no conflicting quicks, and no target-only phases to absorb:
+If there are no conflicting phases, no conflicting quicks, and no target-only phases:
   Output: "Nothing to sync — no index conflicts with [target]."
   Exit successfully.
 
@@ -170,9 +183,15 @@ If --dry-run: print plan and stop. Do not touch anything.
 
 Otherwise: ask user to confirm before proceeding.
 
-## Step 7: Absorb target-only ROADMAP entries
+## Step 7: Absorb target-only planning file content
 
-**Do this before renaming** so the inserted entries get the correct final numbers.
+**Do this before renaming** so all absorbed entries get the correct final numbers.
+
+The goal is: after this step, the local branch already contains everything from the target branch
+that it doesn't already have. Git will see those lines as already present → no conflict on them.
+The merge will then only show lines that are genuinely new on the local branch.
+
+### 7a: ROADMAP.md — phase sections
 
 For each target-only phase (exists on target, not locally):
   - Extract the full phase section from target_roadmap. A phase section runs from its
@@ -180,8 +199,49 @@ For each target-only phase (exists on target, not locally):
   - Insert the extracted section into local ROADMAP.md at the correct sorted position
     (ordered by phase number, before any branch-local phases being renumbered).
 
-This means the local branch already contains the target's new phase entries before the merge.
-Git will see them as already present → no conflict on those lines.
+### 7b: ROADMAP.md — milestone summary list
+
+Read the `## Milestones` bullet list from both target and local ROADMAP.md.
+For each `- ✅` or `- 🚧` line in target that does NOT appear verbatim in the local file:
+  - Insert it into the local `## Milestones` list at the correct chronological position
+    (ordered by version number, e.g. v1.7 before v1.8).
+
+### 7c: MILESTONES.md
+
+Read `.planning/MILESTONES.md` from both target (`git show <target>:.planning/MILESTONES.md`)
+and local. For each `## v1.x` section in target that is NOT present in local (match on the
+heading line, e.g. `## v1.7 Spell Word in Sentence`):
+  - Extract the full section (from its `##` heading to the next `##` heading or end of file).
+  - Insert it into the local MILESTONES.md at the correct chronological position (newer versions
+    at the top, older below).
+
+If MILESTONES.md does not exist on target, skip this step.
+
+### 7d: PROJECT.md — capabilities list
+
+Read `.planning/PROJECT.md` from both target (`git show <target>:.planning/PROJECT.md`) and local.
+
+The capabilities list is the append-only bullet list of `- ✓ description — v1.x` lines that
+records what each milestone shipped. Absorb any lines from target that are missing locally:
+
+- Find all lines matching `- ✓ ` in target's PROJECT.md
+- For each such line that does NOT appear verbatim in local PROJECT.md, insert it into the
+  local capabilities list at the correct position (ordered by milestone version, e.g. v1.7
+  items before v1.8 items)
+
+Do NOT absorb target's "### Active", "## Current Milestone", or "Context" sections — these
+reflect target's working state and should not overwrite the local branch's current state.
+
+If PROJECT.md does not exist on target, skip this step.
+
+### 7e: STATE.md
+
+STATE.md reflects the current working state and should NOT be absorbed from target — the
+local branch's version is always correct (it represents work done after the branch point).
+Skip entirely.
+
+If a merge conflict occurs in STATE.md after merging, resolve it by keeping the local
+branch version of each conflicting block.
 
 ## Step 8: Rename phase directories and files
 
@@ -269,7 +329,9 @@ Do NOT commit. Do NOT push. Leave that to the user.
 
 <success_criteria>
 - No branch-local phase or quick index overlaps with target branch after sync — including archived phases in `.planning/milestones/`
-- Target branch's ROADMAP.md phase entries are absorbed into local ROADMAP.md
+- Target branch's ROADMAP.md phase sections AND milestone summary list entries are absorbed into local ROADMAP.md
+- Target branch's MILESTONES.md sections are absorbed into local MILESTONES.md
+- Target branch's PROJECT.md `- ✓` capability lines are absorbed into local PROJECT.md
 - All renamed directories (active and archived) have their internal files renamed to match
 - Milestone archive ROADMAP files updated to reflect new phase numbers
 - ROADMAP.md and STATE.md reflect the new numbers
